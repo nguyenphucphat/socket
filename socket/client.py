@@ -1,6 +1,6 @@
 import socket
 import os
-
+import threading
 URL = "http://web.stanford.edu/class/cs224w/slides/"
 SERVER_PORT = 80
 FORMAT = "utf8"
@@ -46,7 +46,7 @@ def recv_s(client, content_length):
         
     return data
 
-# hàm trả về headre  
+# hàm trả về header  
 def getHeader(client):
     header = b""
     chunk = b""
@@ -130,10 +130,19 @@ def getFormatName(Path):
 def getFileName(HOST, Path):
     return HOST + '_' + getFormatName(Path)
 
+# kiểm tra có kết nối được đến sever hay không
+def isErrorConnection(header):
+    if b'HTTP/1.1 200' in header:
+        return False
+    return True
+
 # hàm download 1 file duy nhất
-def downloadOneFile(HOST, Path, file_name):
+def downloadOneFile(URL_File, HOST, Path, file_name):
     client = ConnectServerAndRequest(HOST,Path)
     header = getHeader(client)
+    if isErrorConnection(header):
+        print("Can't connect to server: ",URL_File)
+        return False
     data = getDataOfBody(client,header)
 
     with open(file_name, 'wb') as file:
@@ -150,8 +159,16 @@ def isFolder(Path):
         return True
     return False
 
+# tạo 1 luồng request
+def handleSever(URL_File, folder_name):
+    (HOST_File, Path_File) = getHostIPAndPath(URL_File)
+    file_name = folder_name + "\\" + getFormatName(Path_File)
+    downloadOneFile(URL_File,HOST_File,Path_File, file_name)
+    
 # tải toàn bộ file trong folder
 def getAllFilesInFolder(URL_Folder,client_folder,folder_name, data_body):
+    # tao 1 list để chứa các url
+    thread = list()
     # chia nhỏ ra kiểm tra từng đoạn
     for wrap in data_body.split(b'td>'):
         # ví dụ cần tìm:  <td><a href="01-intro.pdf">01-intro.pdf</a></td>
@@ -159,13 +176,19 @@ def getAllFilesInFolder(URL_Folder,client_folder,folder_name, data_body):
             pos_start = wrap.find(b'href=') + 6
             pos_end = wrap.find(b'">',pos_start, len(wrap)-1)
             format_name = wrap[pos_start:pos_end]
+              
             # không có '.' thì không phải file để tải
             if b'.' not in format_name: continue
+            
             # tạo url của file
             URL_File = URL_Folder + format_name.decode()
-            (HOST_File, Path_File) = getHostIPAndPath(URL_File)
-            file_name = folder_name + "\\" + getFormatName(Path_File)
-            downloadOneFile(HOST_File,Path_File, file_name)
+            thread.append(URL_File)
+    # tiến hành tải đa luồng
+    for i in range(len(thread)):
+        process = threading.Thread(target=handleSever, args=(thread[i],folder_name))
+        # process.daemon = True
+        process.start()
+               
 
 # hàm tải dữ liệu từ 1 đường dẫn bất kì
 def downloadFromURL(URL):
@@ -174,10 +197,14 @@ def downloadFromURL(URL):
     file_name = getFileName(HOST,Path)
     # nếu không phải là folder thì tải luôn
     if isFolder(Path) == False:
-       downloadOneFile(HOST, Path,file_name)
+       downloadOneFile(URL,HOST, Path,file_name)
     else:
         client = ConnectServerAndRequest(HOST, Path)
         header = getHeader(client)
+        
+        if isErrorConnection(header):
+            print("Can't connect to server: ",URL)
+            return False
         data_body = getDataOfBody(client,header)
         # tạo 1 folder mới để lưu cái file con
         os.mkdir(file_name)
