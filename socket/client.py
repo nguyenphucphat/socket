@@ -214,7 +214,6 @@ def downloadFromURL(URL):
 
 # kết nối đến nhiều sever cùng lúc
 def downloadListURLs(list_urls):
-    a = 3
     for i in range(len(list_urls)):
         thread = threading.Thread(target=downloadFromURL, args= {list_urls[i]})
         thread.start()
