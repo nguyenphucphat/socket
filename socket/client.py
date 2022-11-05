@@ -1,12 +1,11 @@
-from http import client
-from operator import truediv
 import socket
-from urllib import response
+import os
 
-URL = "http://www-net.cs.umass.edu/wireshark-labs/Wireshark_Intro_v8.1.docx"
+URL = "http://web.stanford.edu/class/cs224w/slides/"
 SERVER_PORT = 80
 FORMAT = "utf8"
 
+# tách host và path khỏi url
 def getHostIPAndPath(URL):
     # trường hợp http://
     pos_start = URL.find("//") + 2
@@ -22,19 +21,21 @@ def getHostIPAndPath(URL):
     Path = URL[pos_end+1:]
     return (Host,Path)
 
-def ConnectServerAndRequest(Path, HOSTIP, SERVER_PORT):
+# kết nối đến server và gửi request
+def ConnectServerAndRequest(HOST, Path):
     # af_inet cho phải truyền tải dữ liệu ra bên ngoài ipv4
     # sock_stream sử dụng tcp
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        client.connect( (socket.gethostbyname(HOSTIP),SERVER_PORT) )
-        request_headers = "GET /" + Path + " HTTP/1.1\r\nHost: " + HOSTIP + "\r\nConnection: keep-alive\r\n\r\n"
+        client.connect( (socket.gethostbyname(HOST),SERVER_PORT) )
+        request_headers = "GET /" + Path + " HTTP/1.1\r\nHost: " + HOST + "\r\nConnection: keep-alive\r\n\r\n"
         
         client.sendall(request_headers.encode())
         return client
     except:
         print("ERROR")
- 
+
+#  hàm giúp nhận đúng số byte của body
 def recv_s(client, content_length):
     data = b""
     real_byte = 0
@@ -44,17 +45,19 @@ def recv_s(client, content_length):
         real_byte = len(data)
         
     return data
-   
+
+# hàm trả về headre  
 def getHeader(client):
     header = b""
     chunk = b""
     header_delimiter = b"\r\n\r\n"
-    
+    # lấy từng byte 1 đến hết body
     while header_delimiter not in header:
         chunk = client.recv(1)
         header += chunk
     return header
 
+# hàm lấy content_length của header
 def getContentLength(header):
     for line in header.split(b'\r\n'):
         if b"Content-Length: " in line:
@@ -62,10 +65,12 @@ def getContentLength(header):
             content_length = line[pos_start+1:]   
             return int(content_length)
 
+# hàm nhập dữ liệu phần body bằng content_length
 def getDatabyContentLength(client,content_length):
     data = recv_s(client, content_length)
     return data
 
+# hàm kiểm tra có truyền dữ liệu kiểu chunk hay không
 def isChunkedEncoding(header):
     signal = b"Transfer-Encoding: chunked"
     
@@ -73,6 +78,7 @@ def isChunkedEncoding(header):
         if signal in line: return True
     return False
 
+# hàm nhận dữ liệu chia nhỏ thành các chunk
 def getDatabyChunk(client):
     CRLF = b"\r\n"
     data = b""
@@ -81,26 +87,36 @@ def getDatabyChunk(client):
         chunk_size = b""
         while CRLF not in chunk_size:
             chunk_size += client.recv(1)
-
+        # lấy chunk size
         if size_delimiter in chunk_size:
+            # nếu có phần mở rộng thì bỏ
             pos = chunk_size.find(size_delimiter)
             size = int(chunk_size[0:pos],16)
         else:  
             size = int(chunk_size[0:len(chunk_size)-2],16)
-            
+        # nhận luôn 2 byte của CRLF    
         if size == 0:
             return data
         response = recv_s(client, size + 2)
 
         data += response[0:len(response)-2]
-     
+
+# hàm nhận data phần body
+def getDataOfBody(client,header):
+    if isChunkedEncoding(header):
+        return getDatabyChunk(client)
+    else:
+        content_length = getContentLength(header)
+        return getDatabyContentLength(client,content_length)
+
+# hàm lấy phần format của file       
 def getFormatName(Path):
     pos = Path.find("/")
     if pos == -1:
         if '.' not in Path:
             return "index.html"
         else: return Path
-    
+    # tìm '/' cuối cùng sau đó là phần format
     while True: 
         pos_cur = Path.find("/",pos + 1 ,len(Path))
         if pos_cur == -1:
@@ -110,28 +126,64 @@ def getFormatName(Path):
         
         pos = pos_cur
 
+# hàm trả về tên của fil domain_format
 def getFileName(HOST, Path):
     return HOST + '_' + getFormatName(Path)
 
+# hàm download 1 file duy nhất
+def downloadOneFile(HOST, Path, file_name):
+    client = ConnectServerAndRequest(HOST,Path)
+    header = getHeader(client)
+    data = getDataOfBody(client,header)
 
-def dowloadFile(client, header, HOST, Path):
-    data = b""
-    if isChunkedEncoding(header):
-        data = getDatabyChunk(client)
-    else:
-        content_length = getContentLength(header)
-        data = getDatabyContentLength(client,content_length)
-    print(len(data))
-    
-      
-    file_name = getFileName(HOST, Path)
     with open(file_name, 'wb') as file:
         file.write(data)
     file.close()
+    client.close()
+       
+# folder
+# kiểm trả đường dẫn có dẫn tới folder hay không
+def isFolder(Path):
+    if Path == "": return False
+    # kí tự cuối cùng
+    if Path[len(Path)-1] == '/':
+        return True
+    return False
 
+# tải toàn bộ file trong folder
+def getAllFilesInFolder(URL_Folder,client_folder,folder_name, data_body):
+    # chia nhỏ ra kiểm tra từng đoạn
+    for wrap in data_body.split(b'td>'):
+        # ví dụ cần tìm:  <td><a href="01-intro.pdf">01-intro.pdf</a></td>
+        if b'href=' in wrap:
+            pos_start = wrap.find(b'href=') + 6
+            pos_end = wrap.find(b'">',pos_start, len(wrap)-1)
+            format_name = wrap[pos_start:pos_end]
+            # không có '.' thì không phải file để tải
+            if b'.' not in format_name: continue
+            # tạo url của file
+            URL_File = URL_Folder + format_name.decode()
+            (HOST_File, Path_File) = getHostIPAndPath(URL_File)
+            file_name = folder_name + "\\" + getFormatName(Path_File)
+            downloadOneFile(HOST_File,Path_File, file_name)
+
+# hàm tải dữ liệu từ 1 đường dẫn bất kì
+def downloadFromURL(URL):
+    (HOST, Path) = getHostIPAndPath(URL)
+   
+    file_name = getFileName(HOST,Path)
+    # nếu không phải là folder thì tải luôn
+    if isFolder(Path) == False:
+       downloadOneFile(HOST, Path,file_name)
+    else:
+        client = ConnectServerAndRequest(HOST, Path)
+        header = getHeader(client)
+        data_body = getDataOfBody(client,header)
+        # tạo 1 folder mới để lưu cái file con
+        os.mkdir(file_name)
+        # tải xuống tất cả
+        getAllFilesInFolder(URL,client, file_name, data_body)
+        client.close()
+    
 # main function     
-(HOST, Path) = getHostIPAndPath(URL)
-client = ConnectServerAndRequest(Path,HOST,SERVER_PORT)
-
-header = getHeader(client)
-dowloadFile(client,header,HOST,Path)
+downloadFromURL(URL)
