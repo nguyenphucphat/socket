@@ -1,9 +1,9 @@
 import socket
 import os
 import threading
-URL = "http://web.stanford.edu/class/cs224w/slides/"
+import sys
+
 SERVER_PORT = 80
-FORMAT = "utf8"
 
 # tách host và path khỏi url
 def getHostIPAndPath(URL):
@@ -211,6 +211,22 @@ def downloadFromURL(URL):
         # tải xuống tất cả
         getAllFilesInFolder(URL,client, file_name, data_body)
         client.close()
+
+# kết nối đến nhiều sever cùng lúc
+def downloadListURLs(list_urls):
+    a = 3
+    for i in range(len(list_urls)):
+        thread = threading.Thread(target=downloadFromURL, args= {list_urls[i]})
+        thread.start()
+
+# hàm main       
+def main():
+    list_urls = list()
+    # sử dụng tham số dòng lệnh
+    for i  in range(1,len(sys.argv)):
+        list_urls.append(str(sys.argv[i]))
+   
+    downloadListURLs(list_urls)
     
-# main function     
-downloadFromURL(URL)
+if __name__ == "__main__":
+    main()
