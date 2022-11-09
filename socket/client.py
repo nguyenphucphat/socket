@@ -22,18 +22,22 @@ def getHostIPAndPath(URL):
     return (Host,Path)
 
 # kết nối đến server và gửi request
-def ConnectServerAndRequest(HOST, Path):
+def ConnectServer(HOST, Path):
     # af_inet cho phải truyền tải dữ liệu ra bên ngoài ipv4
     # sock_stream sử dụng tcp
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client.connect( (socket.gethostbyname(HOST),SERVER_PORT) )
-        request_headers = "GET /" + Path + " HTTP/1.1\r\nHost: " + HOST + "\r\nConnection: keep-alive\r\n\r\n"
-        
-        client.sendall(request_headers.encode())
-        return client
     except:
-        print("ERROR")
+        print("Error Connect To Server")
+    return client
+        
+# gửi request đến sever
+def SendRequest(HOST,Path,client):
+    request_headers = "GET /" + Path + " HTTP/1.1\r\nHost: " + HOST + "\r\nConnection: keep-alive\r\n\r\n"
+        
+    client.sendall(request_headers.encode())
+    return client
 
 #  hàm giúp nhận đúng số byte của body
 def recv_s(client, content_length):
@@ -126,7 +130,7 @@ def getFormatName(Path):
         
         pos = pos_cur
 
-# hàm trả về tên của fil domain_format
+# hàm trả về tên của file domain_format
 def getFileName(HOST, Path):
     return HOST + '_' + getFormatName(Path)
 
@@ -137,18 +141,18 @@ def isErrorConnection(header):
     return True
 
 # hàm download 1 file duy nhất
-def downloadOneFile(URL_File, HOST, Path, file_name):
-    client = ConnectServerAndRequest(HOST,Path)
+def downloadOneFile(URL_File, HOST, Path, file_name,client):
+    client = SendRequest(HOST,Path,client)
     header = getHeader(client)
+    
     if isErrorConnection(header):
-        print("Can't connect to server: ",URL_File)
-        return False
+        print("Can't get Data: ",URL_File)
+        return
     data = getDataOfBody(client,header)
 
     with open(file_name, 'wb') as file:
         file.write(data)
     file.close()
-    client.close()
        
 # folder
 # kiểm trả đường dẫn có dẫn tới folder hay không
@@ -160,11 +164,12 @@ def isFolder(Path):
     return False
 
 # tạo 1 luồng request
-def handleSever(URL_File, folder_name):
+def handleSever(URL_File, folder_name, client_folder):
     (HOST_File, Path_File) = getHostIPAndPath(URL_File)
     file_name = folder_name + "\\" + getFormatName(Path_File)
-    downloadOneFile(URL_File,HOST_File,Path_File, file_name)
-    
+    client = client_folder
+    downloadOneFile(URL_File,HOST_File,Path_File, file_name,client)
+
 # tải toàn bộ file trong folder
 def getAllFilesInFolder(URL_Folder,client_folder,folder_name, data_body):
     # tao 1 list để chứa các url
@@ -183,27 +188,27 @@ def getAllFilesInFolder(URL_Folder,client_folder,folder_name, data_body):
             # tạo url của file
             URL_File = URL_Folder + format_name.decode()
             thread.append(URL_File)
-    # tiến hành tải đa luồng
+    # gửi nhiều request trong 1 connection
     for i in range(len(thread)):
-        process = threading.Thread(target=handleSever, args=(thread[i],folder_name))
-        # process.daemon = True
-        process.start()
-               
+        handleSever(thread[i],folder_name,client_folder)
 
+               
 # hàm tải dữ liệu từ 1 đường dẫn bất kì
 def downloadFromURL(URL):
     (HOST, Path) = getHostIPAndPath(URL)
    
     file_name = getFileName(HOST,Path)
+    client = ConnectServer(HOST, Path)
+    
     # nếu không phải là folder thì tải luôn
     if isFolder(Path) == False:
-       downloadOneFile(URL,HOST, Path,file_name)
+       downloadOneFile(URL,HOST, Path,file_name,client)
     else:
-        client = ConnectServerAndRequest(HOST, Path)
+        client = SendRequest(HOST,Path,client)
         header = getHeader(client)
-        
+    
         if isErrorConnection(header):
-            print("Can't connect to server: ",URL)
+            print("Can't get Data: ",URL)
             return False
         data_body = getDataOfBody(client,header)
         # tạo 1 folder mới để lưu cái file con
@@ -212,7 +217,7 @@ def downloadFromURL(URL):
         getAllFilesInFolder(URL,client, file_name, data_body)
         client.close()
 
-# kết nối đến nhiều sever cùng lúc
+# kết nối đến nhiều sever cùng lúcs
 def downloadListURLs(list_urls):
     for i in range(len(list_urls)):
         thread = threading.Thread(target=downloadFromURL, args= {list_urls[i]})
@@ -226,6 +231,5 @@ def main():
         list_urls.append(str(sys.argv[i]))
    
     downloadListURLs(list_urls)
-    
 if __name__ == "__main__":
     main()
