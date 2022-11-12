@@ -49,14 +49,17 @@ def SendRequest(HOST,Path,client):
 def recv_s(client, content_length):
     data = b""
     real_byte = 0
-    try:
-        while real_byte != content_length:
+    
+    while real_byte != content_length:
+        try :
+            client.settimeout(10)
             data += client.recv(content_length - real_byte)
-            real_byte = len(data)
-            
-        return data
-    except:
-        return data
+        except:
+            # nếu khi mất kết nối tới servr hàm recv sẽ treo đến khi time out
+            return None
+        real_byte = len(data)
+        
+    return data
 
 # hàm trả về header  
 def getHeader(client):
@@ -66,9 +69,11 @@ def getHeader(client):
     # lấy từng byte 1 đến hết body
     while header_delimiter not in header:
         try:
+            client.settimeout(10)
             chunk = client.recv(1)
             header += chunk
         except:
+            # nếu khi mất kết nối tới servr hàm recv sẽ treo đến khi time out
             return None
             
     return header
@@ -115,8 +120,10 @@ def getDatabyChunk(client):
         chunk_size = b""
         while CRLF not in chunk_size:
             try:    
+                client.settimeout(10)
                 chunk_size += client.recv(1)
             except:
+            # nếu khi mất kết nối tới servr hàm recv sẽ treo đến khi time out
                 return
         # lấy chunk size
         if size_delimiter in chunk_size:
@@ -130,11 +137,10 @@ def getDatabyChunk(client):
             return data
         response = recv_s(client, size + 2)
 
+        if response == None:
+            return data
         data += response[0:len(response)-2]
-    
         
-
-       
 # hàm này giúp vừa nhận các chunk vừa ghi file
 def Get_SaveDatabyChunk(client,file_name):
     CRLF = b"\r\n"
@@ -148,8 +154,10 @@ def Get_SaveDatabyChunk(client,file_name):
         chunk_size = b""
         while CRLF not in chunk_size:
             try:
+                client.settimeout(10)
                 chunk_size += client.recv(1)
             except:
+            # nếu khi mất kết nối tới servr hàm recv sẽ treo đến khi time out
                 file.close()
                 return  None
         # lấy chunk size
@@ -164,6 +172,9 @@ def Get_SaveDatabyChunk(client,file_name):
             file.close()
             return data
         response = recv_s(client, size + 2)
+        # kiểm tra có mất kết nối trong quá trình nhận file hay không
+        if response == None:
+            file.close()
         data += response[0:len(data)-2]
         file.write(response[0:len(data)-2])   
     file.close()
@@ -204,9 +215,8 @@ def downloadOneFile(URL_File, HOST, Path, file_name,client):
     try:
         client = SendRequest(HOST,Path,client)
         header = getHeader(client)
-        
+       
         if isErrorConnection(header):
-            print("Can't get Data: ",URL_File)
             return
         
         if isChunkedEncoding(header) == False: 
@@ -328,12 +338,12 @@ def main():
     try:
         list_urls = list()
         # sử dụng tham số dòng lệnh
-        # for i  in range(1,len(sys.argv)):
-        #     list_urls.append(str(sys.argv[i]))
-    
-        list_urls.append("http://web.stanford.edu/class/cs224w/slides/")
+        for i  in range(1,len(sys.argv)):
+            list_urls.append(str(sys.argv[i]))
         downloadListURLs(list_urls)
     except:
         return
+    
+# chỉ hàm main trong file này mới được chạy
 if __name__ == "__main__":
     main()
